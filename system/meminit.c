@@ -17,7 +17,7 @@ void	meminit(void) {
 
        /* Note: we pre-allocate  the "hole" between 640K and 1024K */
 	//maxheap already initialized in i386.c
-    //maxheap = (void *)0x600000;	/* Assume 64 Mbytes for now */
+//       maxheap = (void *)0x600000;	/* Assume 64 Mbytes for now */
        minheap = &end;
 
        memptr = memlist.mnext = (struct memblk *)roundmb(minheap);

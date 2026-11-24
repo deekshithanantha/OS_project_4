@@ -76,3 +76,17 @@ void	hexdump(
         fprintf(stdout, "\n");
     }
 }
+
+/* ######### PAGING MOD ######### */
+
+/* Number of free frames in the FFS */
+uint32 free_ffs_pages(){
+}
+
+/* Number of virt. pages allocated by a particular proc. */
+uint32 allocated_virtual_pages(pid32 pid){
+}
+
+/* Number of FFS frames in use by a given proc. */
+uint32 used_ffs_frames(pid32 pid){
+}

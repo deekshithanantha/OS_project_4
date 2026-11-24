@@ -222,6 +222,11 @@ static	void	sysinit()
 	for (i = 0; i < NDEVS; i++) {
 		init(i);
 	}
+
+    /* ######### PAGING MOD ######### */
+    sys_pt_init();
+    enable_paging();
+
 	return;
 }
 
