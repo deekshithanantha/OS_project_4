@@ -5,6 +5,7 @@
 #include <process.h>
 #include <queue.h>
 #include <resched.h>
+#include <paging.h>
 #include <mark.h>
 #include <semaphore.h>
 #include <memory.h>
