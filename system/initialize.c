@@ -148,6 +148,7 @@ static	void	sysinit()
 	int32	i;
 	struct	procent	*prptr;		/* Ptr to process table entry	*/
 	struct	sentry	*semptr;	/* Ptr to semaphore table entry	*/
+	pd_t	*directory;		/* System page directory	*/
 
 	/* Reset the console */
 
@@ -222,6 +223,20 @@ static	void	sysinit()
 	for (i = 0; i < NDEVS; i++) {
 		init(i);
 	}
+
+	/* These page tables use 32-bit paging with PAE off. */
+	if (read_cr4() & (1UL << 5)) {
+		panic("System page tables require CR4.PAE to be clear");
+	}
+
+	directory = paging_build_system();
+	if (directory == NULL) {
+		panic("Could not build the system page directory");
+	}
+
+	/* Load the map before nulluser enables interrupts. */
+	write_cr3((uint32)directory);
+	enable_paging();
 	return;
 }
 

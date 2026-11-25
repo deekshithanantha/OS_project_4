@@ -81,6 +81,8 @@ void write_cr3(unsigned long n);
 
 void write_cr4(unsigned long n);
 
-void enable_paging();
+void enable_paging(void);
+
+pd_t *paging_build_system(void);
 
 #endif

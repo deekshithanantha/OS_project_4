@@ -1,42 +1,39 @@
+/* meminit.c - meminit */
+
 #include <xinu.h>
 
-/* Memory bounds */
-
-void	*minheap;		/* Start of heap			*/
-void	*maxheap;		/* Highest valid heap address		*/
-
+void	*minheap;		/* Start of heap. */
+void	*maxheap;		/* Highest valid Xinu memory address. */
 /*------------------------------------------------------------------------
  * meminit - initialize memory bounds and the free memory list
  *------------------------------------------------------------------------
  */
-void	meminit(void) {
+void meminit(void)
+{
+    struct memblk *block;
+    /* Start the heap just past the kernel image. */
+    uint32 heap_start = (uint32)roundmb(&end);
+    uint32 xinu_end = (uint32)maxheap + 1U;
+    uint32 heap_end;
 
-       struct	memblk	*memptr;	/* Ptr to memory block		*/
+    if (xinu_end <= NULLSTK) {
+        panic("No space for the Xinu boot stack");
+    }
 
-       /* Initialize the free memory list */
+    /* Leave room at the top for the boot stack. */
+    heap_end = (uint32)truncmb(xinu_end - NULLSTK);
 
-       /* Note: we pre-allocate  the "hole" between 640K and 1024K */
-	//maxheap already initialized in i386.c
-    //maxheap = (void *)0x600000;	/* Assume 64 Mbytes for now */
-       minheap = &end;
+    /* The heap must fit above the PC memory hole. */
+    if (heap_start < (uint32)HOLEEND || heap_start >= heap_end ||
+        heap_end - heap_start < sizeof(struct memblk)) {
+        panic("Invalid Xinu heap bounds");
+    }
 
-       memptr = memlist.mnext = (struct memblk *)roundmb(minheap);
-       if ((char *)(maxheap+1) > HOLESTART) {
-       	/* create two blocks that straddle the hole */
-       	memptr->mnext = (struct memblk *)HOLEEND;
-       	memptr->mlength = (int) truncmb((unsigned) HOLESTART -
-            		 (unsigned)&end - 4);
-       	memptr = (struct memblk *) HOLEEND;
-       	memptr->mnext = (struct memblk *) NULL;
-       	memptr->mlength = (int) truncmb( (uint32)maxheap - 
-       			(uint32)HOLEEND - NULLSTK);
-       } else {
-       	/* initialize free memory list to one block */
-       	memlist.mnext = memptr = (struct memblk *) roundmb(&end);
-       	memptr->mnext = (struct memblk *) NULL;
-       	memptr->mlength = (uint32) truncmb((uint32)maxheap -
-       			(uint32)&end - NULLSTK);
-       }
-
-       return;
+    /* Start the free list with one block. */
+    minheap = (void *)heap_start;
+    block = (struct memblk *)minheap;
+    block->mnext = NULL;
+    block->mlength = heap_end - heap_start;
+    memlist.mnext = block;
+    memlist.mlength = block->mlength;
 }
