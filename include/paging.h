@@ -85,4 +85,6 @@ void enable_paging(void);
 
 pd_t *paging_build_system(void);
 
+extern uint32 system_pdbr;
+
 #endif

@@ -25,6 +25,7 @@ struct	memblk	memlist;	/* List of free memory blocks		*/
 
 int	prcount;		/* Total number of live processes	*/
 pid32	currpid;		/* ID of currently executing process	*/
+uint32 system_pdbr;     /* Will hold the phy add of the system */
 
 /* Control sequence to reset the console colors and cusor positiion	*/
 
@@ -234,8 +235,12 @@ static	void	sysinit()
 		panic("Could not build the system page directory");
 	}
 
+	system_pdbr = (uint32) directory;
+	proctab[NULLPROC].prpdbr = system_pdbr;
+
+
 	/* Load the map before nulluser enables interrupts. */
-	write_cr3((uint32)directory);
+	write_cr3(system_pdbr);
 	enable_paging();
 	return;
 }
