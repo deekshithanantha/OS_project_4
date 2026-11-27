@@ -53,6 +53,7 @@ struct procent {		/* Entry in the process table		*/
 	bool8	prhasmsg;	/* Nonzero iff msg is valid		*/
 	int16	prdesc[NDESC];	/* Device descriptors for process	*/
 	uint32  prpdbr;     /* This will hold the base address of the PD */
+	byte	*prvheap_bitmap;	/* Reserved virtual heap pages		*/
 };
 
 /* Marker for the top of a process stack (used to help detect overflow)	*/

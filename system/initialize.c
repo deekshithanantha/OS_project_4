@@ -237,6 +237,7 @@ static	void	sysinit()
 
 	system_pdbr = (uint32) directory;
 	proctab[NULLPROC].prpdbr = system_pdbr;
+	proctab[NULLPROC].prvheap_bitmap = NULL;
 
 
 	/* Load the map before nulluser enables interrupts. */

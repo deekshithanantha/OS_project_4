@@ -122,3 +122,172 @@ pd_t *paging_build_system(void)
 #endif
     return directory;
 }
+
+// Track useable frames in the Page Table
+// 0-> free, 1 ->use
+static byte pt_frame_used[MAX_PT_SIZE];
+
+
+
+/* Keep interrupts disabled until paging_leave_system() restores CR3. */
+uint32 paging_enter_system(void) {
+
+    uint32 previous_pdbr = (uint32) read_cr3();
+
+    if(previous_pdbr != system_pdbr) {
+        write_cr3(system_pdbr);
+    }
+
+    return previous_pdbr;
+
+}
+
+/* Restore the directory that was active before borrowing the system map. */
+
+void paging_leave_system(uint32 previous_pdbr) {
+
+    if(previous_pdbr != system_pdbr) {
+        write_cr3(previous_pdbr);
+    }
+}
+
+
+
+// To allocate 4kb of frame size for a pagetable or a directory
+// Return Physical addrss, or NULL if the pool is full
+
+
+uint32 paging_alloc_pt_frame(void) {
+
+    uint32 frame;
+    uint32 index = 0;
+
+    for(frame = next_pt_frame; frame < pt_pool_end; frame += PAGE_SIZE, index++) {
+
+        if(!pt_frame_used[index])
+        {
+            pt_frame_used[index] = 1;
+            memset((void *)frame, 0, PAGE_SIZE);
+            return frame;
+        }
+    }
+    return 0;
+}
+
+// A function to free a frame, must clear off any active refrences to it
+// before freeing it
+
+status paging_free_pt_frame(uint32 frame) {
+    uint32 index ;
+
+    // To avoid addresses outside the reusable pool and
+    // addresses in the middle of the frame.
+
+    if(frame < next_pt_frame || frame >= pt_pool_end || (frame & (PAGE_SIZE - 1U)) != 0)
+    {
+        return SYSERR;
+    }
+
+
+    index = (frame - next_pt_frame) / PAGE_SIZE;
+
+    // to make sure page is free
+    if(!pt_frame_used[index]) {
+        return SYSERR;
+    }
+
+    // The allocator will zero this frame when someone uses it again
+    pt_frame_used[index] = 0;
+    return OK;
+}
+
+// a Function to build and address space when vcreate is called
+// return physcical address, or NUll on failures
+
+uint32 paging_create_user_directory(void) {
+
+    intmask mask = disable();
+    uint32 previous_pdbr = paging_enter_system();
+    uint32 pdbr = paging_alloc_pt_frame();
+
+
+    uint32 shared_tables = (XINU_PAGES) / PT_ENTRIES;
+    uint32 shared_tail = (XINU_PAGES) % PT_ENTRIES;
+
+
+
+    pd_t *system_directory = (pd_t *) system_pdbr;
+    pd_t *directory = (pd_t *) pdbr;
+
+    uint32 table_frame;
+    pt_t *system_table;
+
+    if(pdbr !=0) {
+        memcpy(directory, system_directory, shared_tables * sizeof(pd_t));
+
+        if (shared_tail != 0) {
+            table_frame = paging_alloc_pt_frame();
+
+            if (table_frame == 0)
+            {
+                paging_free_pt_frame(pdbr);
+                pdbr = 0;
+            }
+            else {
+
+                system_table = (pt_t *) ((uint32)system_directory[shared_tables].pd_base  << PAGE_SHIFT);
+
+                memcpy((void *)table_frame, system_table, shared_tail * sizeof(pt_t));
+
+                directory[shared_tables] = system_directory[shared_tables];
+                directory[shared_tables].pd_base = table_frame >> PAGE_SHIFT;
+            }
+        }
+
+    }
+
+    paging_leave_system(previous_pdbr);
+    restore(mask);
+    return pdbr;
+}
+
+// Release a private direcory and its owned 2nd level tables
+
+
+status paging_destroy_user_directory(uint32 pdbr)
+{
+    intmask mask = disable();
+    uint32 previous_pdbr = (uint32)read_cr3();
+
+
+    uint32 first_owned = (XINU_PAGES) / PT_ENTRIES;
+    uint32 index;
+    uint32 table_frame;
+    pd_t *directory;
+
+
+    if (pdbr == previous_pdbr || pdbr < next_pt_frame || pdbr >= pt_pool_end || (pdbr & (PAGE_SIZE - 1U)) != 0 ||
+        !pt_frame_used[(pdbr - next_pt_frame) / PAGE_SIZE])
+    {
+        restore(mask);
+        return SYSERR;
+    }
+
+    paging_enter_system();
+    directory = (pd_t *)pdbr;
+
+
+    for (index = first_owned; index < PT_ENTRIES; index++) {
+        if (directory[index].pd_pres) {
+            table_frame = (uint32)directory[index].pd_base << PAGE_SHIFT;
+            if (paging_free_pt_frame(table_frame) == SYSERR) {
+                panic("Invalid private page-table frame");
+            }
+        }
+    }
+
+    paging_free_pt_frame(pdbr);
+    paging_leave_system(previous_pdbr);
+    restore(mask);
+    return OK;
+}

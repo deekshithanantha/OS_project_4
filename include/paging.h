@@ -87,4 +87,23 @@ pd_t *paging_build_system(void);
 
 extern uint32 system_pdbr;
 
+// The below are added while creating Vcreate and allocating
+// the directory structure for a user process
+
+#define VHEAP_BASE ((uint32)(XINU_PAGES) * PAGE_SIZE)
+#define VHEAP_PAGE_COUNT ((1U << 20) - (XINU_PAGES)) // The pages left for process
+#define VHEAP_BITMAP_SIZE ((VHEAP_PAGE_COUNT + 7U) / 8U )
+
+/* Keep interrupts disabled while borrowing the system directory. */
+uint32 paging_enter_system(void);
+void paging_leave_system(uint32 previous_pdbr);
+
+/* Keep the system directory active and interrupts disabled for pool edits. */
+uint32 paging_alloc_pt_frame(void);
+status paging_free_pt_frame(uint32 frame);
+
+uint32 paging_create_user_directory(void);
+status paging_destroy_user_directory(uint32 pdbr);
+
+
 #endif

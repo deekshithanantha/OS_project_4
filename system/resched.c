@@ -41,6 +41,10 @@ void	resched(void)		/* Assumes interrupts are disabled	*/
 	ptnew = &proctab[currpid];
 	ptnew->prstate = PR_CURR;
 	preempt = QUANTUM;		/* Reset time slice for process	*/
+	/* Both process stacks are mapped in the incoming directory. */
+	if (read_cr3() != ptnew->prpdbr) {
+		write_cr3(ptnew->prpdbr);
+	}
 	ctxsw(&ptold->prstkptr, &ptnew->prstkptr);
 
 	/* Old process returns here when resumed */

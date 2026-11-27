@@ -1,191 +1,122 @@
-/* create.c - create, newpid */
+/* create.c - create, vcreate, newpid */
 
 #include <xinu.h>
 
-local	int newpid();
+#define INITIAL_STACK_WORDS 13U
 
-/*------------------------------------------------------------------------
- *  vcreate  -  Create a user process with a virtual heap
- *------------------------------------------------------------------------
- */
-pid32	vcreate(
-	  void		*funcaddr,	/* Address of the function	*/
-	  uint32	ssize,		/* Stack size in bytes		*/
-	  pri16		priority,	/* Process priority > 0		*/
-	  char		*name,		/* Name (for debugging)		*/
-	  uint32	nargs,		/* Number of args that follow	*/
-	  ...
-	)
+local pid32 newpid(void);
+
+static pid32 create_process(void *funcaddr, uint32 ssize, pri16 priority,
+                            char *name, uint32 nargs, const void *args,
+                            bool8 private_heap)
 {
-	uint32		savsp, *pushsp;
-	intmask 	mask;    	/* Interrupt mask		*/
-	pid32		pid;		/* Stores new process id	*/
-	struct	procent	*prptr;		/* Pointer to proc. table entry */
-	int32		i;
-	uint32		*a;		/* Points to list of args	*/
-	uint32		*saddr;		/* Stack address		*/
+    uint32 savsp, *pushsp, *saddr;
+    intmask mask;
+    pid32 pid;
+    struct procent *prptr;
+    uint32 pdbr = system_pdbr;
+    byte *heap_bitmap = NULL;
+    int32 i;
 
-	mask = disable();
-	if (ssize < MINSTK)
-		ssize = MINSTK;
-	ssize = (uint32) roundmb(ssize);
-	if ( (priority < 1) || ((pid=newpid()) == SYSERR) ||
-	     ((saddr = (uint32 *)getstk(ssize)) == (uint32 *)SYSERR) ) {
-		restore(mask);
-		return SYSERR;
-	}
+    mask = disable();
+    if (ssize < MINSTK) {
+        ssize = MINSTK;
+    }
+    if (priority < 1 || ssize > 0xFFFFFFFFU - 7U) {
+        restore(mask);
+        return SYSERR;
+    }
+    ssize = (uint32)roundmb(ssize);
+    if (nargs > ssize / sizeof(uint32) - INITIAL_STACK_WORDS ||
+        (pid = newpid()) == SYSERR ||
+        (saddr = (uint32 *)getstk(ssize)) == (uint32 *)SYSERR) {
+        restore(mask);
+        return SYSERR;
+    }
 
-	prcount++;
-	prptr = &proctab[pid];
+    if (private_heap) {
+        /* The bitmap records reservations. Heap frames are allocated later. */
+        heap_bitmap = (byte *)getmem(VHEAP_BITMAP_SIZE);
+        if (heap_bitmap == (byte *)SYSERR) {
+            goto free_stack;
+        }
 
-	/* Initialize process table entry for new process */
-	prptr->prstate = PR_SUSP;	/* Initial state is suspended	*/
-	prptr->prprio = priority;
-	prptr->prstkbase = (char *)saddr;
-	prptr->prstklen = ssize;
-	prptr->prname[PNMLEN-1] = NULLCH;
-	for (i=0 ; i<PNMLEN-1 && (prptr->prname[i]=name[i])!=NULLCH; i++)
-		;
-	prptr->prsem = -1;
-	prptr->prparent = (pid32)getpid();
-	prptr->prhasmsg = FALSE;
+        pdbr = paging_create_user_directory();
+        if (pdbr == 0) {
+            freemem((char *)heap_bitmap, VHEAP_BITMAP_SIZE);
+            goto free_stack;
+        }
+        memset(heap_bitmap, 0, VHEAP_BITMAP_SIZE);
+    }
 
-	/* Set up stdin, stdout, and stderr descriptors for the shell	*/
-	prptr->prdesc[0] = CONSOLE;
-	prptr->prdesc[1] = CONSOLE;
-	prptr->prdesc[2] = CONSOLE;
+    prptr = &proctab[pid];
+    prptr->prpdbr = pdbr;
+    prptr->prvheap_bitmap = heap_bitmap;
+    prptr->prprio = priority;
+    prptr->prstkbase = (char *)saddr;
+    prptr->prstklen = ssize;
+    prptr->prname[PNMLEN - 1] = NULLCH;
+    for (i = 0; i < PNMLEN - 1 && (prptr->prname[i] = name[i]) != NULLCH; i++) {
+        ;
+    }
+    prptr->prsem = -1;
+    prptr->prparent = (pid32)getpid();
+    prptr->prhasmsg = FALSE;
+    prptr->prdesc[0] = CONSOLE;
+    prptr->prdesc[1] = CONSOLE;
+    prptr->prdesc[2] = CONSOLE;
 
-	/* Initialize stack as if the process was called		*/
+    *saddr = STACKMAGIC;
+    savsp = (uint32)saddr;
 
-	*saddr = STACKMAGIC;
-	savsp = (uint32)saddr;
+    /* The i386 argument words appear in call order above the return address. */
+    if (nargs != 0) {
+        saddr -= nargs;
+        memcpy(saddr, args, nargs * sizeof(uint32));
+    }
+    *--saddr = (uint32)INITRET;
 
-	/* Push arguments */
-	a = (uint32 *)(&nargs + 1);	/* Start of args		*/
-	a += nargs -1;			/* Last argument		*/
-	for ( ; nargs > 0 ; nargs--)	/* Machine dependent; copy args	*/
-		*--saddr = *a--;	/* onto created process's stack	*/
-	*--saddr = (long)INITRET;	/* Push on return address	*/
+    /* Match the stack layout that ctxsw restores on its first switch. */
+    *--saddr = (uint32)funcaddr;
+    *--saddr = savsp;
+    savsp = (uint32)saddr;
+    *--saddr = 0x00000200;       /* Start with interrupts enabled. */
 
-	/* The following entries on the stack must match what ctxsw	*/
-	/*   expects a saved process state to contain: ret address,	*/
-	/*   ebp, interrupt mask, flags, registers, and an old SP	*/
+    *--saddr = 0;                /* eax */
+    *--saddr = 0;                /* ecx */
+    *--saddr = 0;                /* edx */
+    *--saddr = 0;                /* ebx */
+    *--saddr = 0;                /* esp, filled in below */
+    pushsp = saddr;
+    *--saddr = savsp;            /* ebp */
+    *--saddr = 0;                /* esi */
+    *--saddr = 0;                /* edi */
+    prptr->prstkptr = (char *)saddr;
+    *pushsp = (uint32)saddr;
 
-	*--saddr = (long)funcaddr;	/* Make the stack look like it's*/
-					/*   half-way through a call to	*/
-					/*   ctxsw that "returns" to the*/
-					/*   new process		*/
-	*--saddr = savsp;		/* This will be register ebp	*/
-					/*   for process exit		*/
-	savsp = (uint32) saddr;		/* Start of frame for ctxsw	*/
-	*--saddr = 0x00000200;		/* New process runs with	*/
-					/*   interrupts enabled		*/
+    prptr->prstate = PR_SUSP;
+    prcount++;
+    restore(mask);
+    return pid;
 
-	/* Basically, the following emulates an x86 "pushal" instruction*/
-
-	*--saddr = 0;			/* %eax */
-	*--saddr = 0;			/* %ecx */
-	*--saddr = 0;			/* %edx */
-	*--saddr = 0;			/* %ebx */
-	*--saddr = 0;			/* %esp; value filled in below	*/
-	pushsp = saddr;			/* Remember this location	*/
-	*--saddr = savsp;		/* %ebp (while finishing ctxsw)	*/
-	*--saddr = 0;			/* %esi */
-	*--saddr = 0;			/* %edi */
-	*pushsp = (unsigned long) (prptr->prstkptr = (char *)saddr);
-	restore(mask);
-	return pid;
+free_stack:
+    freestk((char *)saddr, ssize);
+    restore(mask);
+    return SYSERR;
 }
 
-pid32	create(
-	  void		*funcaddr,	/* Address of the function	*/
-	  uint32	ssize,		/* Stack size in bytes		*/
-	  pri16		priority,	/* Process priority > 0		*/
-	  char		*name,		/* Name (for debugging)		*/
-	  uint32	nargs,		/* Number of args that follow	*/
-	  ...
-	)
+pid32 create(void *funcaddr, uint32 ssize, pri16 priority, char *name,
+             uint32 nargs, ...)
 {
-	uint32		savsp, *pushsp;
-	intmask 	mask;    	/* Interrupt mask		*/
-	pid32		pid;		/* Stores new process id	*/
-	struct	procent	*prptr;		/* Pointer to proc. table entry */
-	int32		i;
-	uint32		*a;		/* Points to list of args	*/
-	uint32		*saddr;		/* Stack address		*/
+    return create_process(funcaddr, ssize, priority, name, nargs,
+                          __builtin_next_arg(nargs), FALSE);
+}
 
-	mask = disable();
-	if (ssize < MINSTK)
-		ssize = MINSTK;
-	ssize = (uint32) roundmb(ssize);
-	if ( (priority < 1) || ((pid=newpid()) == SYSERR) ||
-	     ((saddr = (uint32 *)getstk(ssize)) == (uint32 *)SYSERR) ) {
-		restore(mask);
-		return SYSERR;
-	}
-
-	prcount++;
-	prptr = &proctab[pid];
-
-	prptr->prpdbr = system_pdbr;
-
-	/* Initialize process table entry for new process */
-	prptr->prstate = PR_SUSP;	/* Initial state is suspended	*/
-	prptr->prprio = priority;
-	prptr->prstkbase = (char *)saddr;
-	prptr->prstklen = ssize;
-	prptr->prname[PNMLEN-1] = NULLCH;
-	for (i=0 ; i<PNMLEN-1 && (prptr->prname[i]=name[i])!=NULLCH; i++)
-		;
-	prptr->prsem = -1;
-	prptr->prparent = (pid32)getpid();
-	prptr->prhasmsg = FALSE;
-
-	/* Set up stdin, stdout, and stderr descriptors for the shell	*/
-	prptr->prdesc[0] = CONSOLE;
-	prptr->prdesc[1] = CONSOLE;
-	prptr->prdesc[2] = CONSOLE;
-
-	/* Initialize stack as if the process was called		*/
-
-	*saddr = STACKMAGIC;
-	savsp = (uint32)saddr;
-
-	/* Push arguments */
-	a = (uint32 *)(&nargs + 1);	/* Start of args		*/
-	a += nargs -1;			/* Last argument		*/
-	for ( ; nargs > 0 ; nargs--)	/* Machine dependent; copy args	*/
-		*--saddr = *a--;	/* onto created process's stack	*/
-	*--saddr = (long)INITRET;	/* Push on return address	*/
-
-	/* The following entries on the stack must match what ctxsw	*/
-	/*   expects a saved process state to contain: ret address,	*/
-	/*   ebp, interrupt mask, flags, registers, and an old SP	*/
-
-	*--saddr = (long)funcaddr;	/* Make the stack look like it's*/
-					/*   half-way through a call to	*/
-					/*   ctxsw that "returns" to the*/
-					/*   new process		*/
-	*--saddr = savsp;		/* This will be register ebp	*/
-					/*   for process exit		*/
-	savsp = (uint32) saddr;		/* Start of frame for ctxsw	*/
-	*--saddr = 0x00000200;		/* New process runs with	*/
-					/*   interrupts enabled		*/
-
-	/* Basically, the following emulates an x86 "pushal" instruction*/
-
-	*--saddr = 0;			/* %eax */
-	*--saddr = 0;			/* %ecx */
-	*--saddr = 0;			/* %edx */
-	*--saddr = 0;			/* %ebx */
-	*--saddr = 0;			/* %esp; value filled in below	*/
-	pushsp = saddr;			/* Remember this location	*/
-	*--saddr = savsp;		/* %ebp (while finishing ctxsw)	*/
-	*--saddr = 0;			/* %esi */
-	*--saddr = 0;			/* %edi */
-	*pushsp = (unsigned long) (prptr->prstkptr = (char *)saddr);
-	restore(mask);
-	return pid;
+pid32 vcreate(void *funcaddr, uint32 ssize, pri16 priority, char *name,
+              uint32 nargs, ...)
+{
+    return create_process(funcaddr, ssize, priority, name, nargs,
+                          __builtin_next_arg(nargs), TRUE);
 }
 
 /*------------------------------------------------------------------------
