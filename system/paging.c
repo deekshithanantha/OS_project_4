@@ -2,8 +2,6 @@
 
 #include <xinu.h>
 
-#define PT_ENTRIES 1024U
-#define PAGE_SHIFT 12U
 #define PD_SHIFT   22U
 #define ADDR_MAX   0xFFFFFFFFU
 
@@ -104,6 +102,9 @@ pd_t *paging_build_system(void)
     /* Put the table pool right after the shared Xinu memory. */
     next_pt_frame = xinu_end;
     pt_pool_end = xinu_end + (MAX_PT_SIZE) * PAGE_SIZE;
+    if ((MAX_FFS_SIZE) > VIRTUAL_PAGE_COUNT - pt_pool_end / PAGE_SIZE) {
+        return NULL;
+    }
 
     directory = alloc_boot_pt_frame();
     if (directory == NULL) {

@@ -40,7 +40,12 @@ syscall	kill(
 		if (self) {
 			write_cr3(system_pdbr);
 		}
-		/* Demand paging will release FFS frames before the tables. */
+
+		if (paging_release_heap_pages(pid, 0, VHEAP_PAGE_COUNT) == SYSERR) 
+		
+		{
+			panic("Could not release private heap frames");
+		}
 		if (paging_destroy_user_directory(prptr->prpdbr) == SYSERR) {
 			panic("Could not release private page directory");
 		}

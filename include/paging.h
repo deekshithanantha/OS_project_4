@@ -8,6 +8,12 @@
 #define PAGE_SIZE       4096    /* number of bytes per page                              */
 #define MAX_FFS_SIZE    16*1024 /* size of FFS space  (in frames)                        */
 #define MAX_PT_SIZE     1024    /* size of space used for page tables (in frames)        */
+#define PT_ENTRIES      1024U
+#define PAGE_SHIFT      12U
+#define VIRTUAL_PAGE_COUNT (PT_ENTRIES * PT_ENTRIES)
+#define PAGEFAULT_VECTOR 14U
+/* Physical FFS frame numbers start immediately past the page-table pool. */
+#define FFS_FIRST_FRAME ((XINU_PAGES) + (MAX_PT_SIZE))
 
 
 /* Structure for a page directory entry */
@@ -91,7 +97,8 @@ extern uint32 system_pdbr;
 // the directory structure for a user process
 
 #define VHEAP_BASE ((uint32)(XINU_PAGES) * PAGE_SIZE)
-#define VHEAP_PAGE_COUNT ((1U << 20) - (XINU_PAGES)) // The pages left for process
+#define VHEAP_PAGE_COUNT (VIRTUAL_PAGE_COUNT - (XINU_PAGES))
+
 #define VHEAP_BITMAP_SIZE ((VHEAP_PAGE_COUNT + 7U) / 8U )
 
 /* Keep interrupts disabled while borrowing the system directory. */
@@ -104,6 +111,18 @@ status paging_free_pt_frame(uint32 frame);
 
 uint32 paging_create_user_directory(void);
 status paging_destroy_user_directory(uint32 pdbr);
+
+void pagefault_handler_disp(void);
+void pagefault_handler(void);
+
+/* Called with interrupts disabled after checking the page is reserved. */
+status paging_map_heap_page(uint32 address);
+
+/* Release FFS mappings for a heap-relative range, keeping the page tables. */
+status paging_release_heap_pages(pid32 pid, uint32 first_page, uint32 npages);
+uint32 free_ffs_pages(void);
+uint32 used_ffs_frames(pid32 pid);
+uint32 allocated_virtual_pages(pid32 pid);
 
 
 #endif

@@ -58,7 +58,8 @@ int32	set_evec(uint32 xnum, uint32 handler)
 	pidt->igd_loffset = handler;
 	pidt->igd_segsel = 0x8;		/* kernel code segment */
 	pidt->igd_mbz = 0;
-	pidt->igd_type = IGDT_TRAPG;
+	/* Save CR2 before another process can run and take a page fault. */
+	pidt->igd_type = (xnum == PAGEFAULT_VECTOR) ? IGDT_INTR : IGDT_TRAPG;
 	pidt->igd_dpl = 0;
 	pidt->igd_present = 1;
 	pidt->igd_hoffset = handler >> 16;

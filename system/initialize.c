@@ -239,6 +239,7 @@ static	void	sysinit()
 	proctab[NULLPROC].prpdbr = system_pdbr;
 	proctab[NULLPROC].prvheap_bitmap = NULL;
 
+	set_evec(PAGEFAULT_VECTOR, (uint32)pagefault_handler_disp);
 
 	/* Load the map before nulluser enables interrupts. */
 	write_cr3(system_pdbr);
