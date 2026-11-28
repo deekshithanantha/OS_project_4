@@ -108,6 +108,10 @@ extern	syscall	freebuf(char *);
 /* in file freemem.c */
 extern	syscall	freemem(char *, uint32);
 
+extern syscall sys_pt_init();
+extern char* vmalloc(uint32);
+extern syscall vfree(char*, uint32);
+
 /* in file getbuf.c */
 extern	char	*getbuf(bpid32);
 
